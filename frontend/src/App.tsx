@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Music, Play, Sparkles, Wand2 } from 'lucide-react';
+import * as Tone from 'tone';
+
+interface ChordData {
+  chord: string;
+  notes: string[];
+  duration: string;
+}
 
 const PIANO_KEYS = [
   { note: 'C4', type: 'white' }, { note: 'C#4', type: 'black' },
@@ -15,27 +22,95 @@ const PIANO_KEYS = [
 ];
 
 function App() {
-  const isPlaying = window.location.hash === '#playing';
-  const prompt = isPlaying ? "A melancholic jazz progression for a rainy day..." : "A melancholic jazz progression for a rainy day...";
-  
-  const chords = isPlaying ? [
-    { chord: 'Dm9', notes: ['D4', 'F4', 'A4', 'C5', 'E5'] },
-    { chord: 'G13', notes: ['G4', 'B4', 'D5', 'F5', 'E5'] },
-    { chord: 'Cmaj9', notes: ['C4', 'E4', 'G4', 'B4', 'D5'] },
-    { chord: 'A7alt', notes: ['A4', 'C#5', 'E5', 'G5', 'Bb5'] },
-  ] : [];
+  const [prompt, setPrompt] = useState('');
+  const [chords, setChords] = useState<ChordData[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [activeNotes, setActiveNotes] = useState<Set<string>>(new Set());
+  const synth = useRef<Tone.PolySynth | null>(null);
 
-  const activeNotes = new Set(isPlaying ? ['D4', 'F4', 'A4', 'C5', 'E5'] : []);
+  useEffect(() => {
+    // Initialize synth
+    synth.current = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope: { attack: 0.05, decay: 0.1, sustain: 0.3, release: 1 }
+    }).toDestination();
+
+    return () => {
+      synth.current?.dispose();
+    };
+  }, []);
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return;
+    
+    setIsLoading(true);
+    try {
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${API_URL}/api/generate-chords`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+
+      if (!response.ok) throw new Error('Failed to generate');
+      
+      const data = await response.json();
+      setChords(data.chords || []);
+    } catch (error) {
+      console.error(error);
+      alert('Failed to generate chords. Make sure backend is running.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const playProgression = async () => {
+    if (chords.length === 0 || !synth.current) return;
+    
+    await Tone.start();
+    setIsPlaying(true);
+    
+    const now = Tone.now();
+    let timeOffset = 0;
+
+    chords.forEach((chordData, index) => {
+      const duration = Tone.Time(chordData.duration).toSeconds();
+      
+      // Schedule visual update
+      Tone.Draw.schedule(() => {
+        setActiveNotes(new Set(chordData.notes));
+      }, now + timeOffset);
+
+      // Schedule notes
+      synth.current?.triggerAttackRelease(chordData.notes, duration - 0.1, now + timeOffset);
+      
+      timeOffset += duration;
+
+      // Clear visual update
+      Tone.Draw.schedule(() => {
+        setActiveNotes(new Set());
+        if (index === chords.length - 1) setIsPlaying(false);
+      }, now + timeOffset);
+    });
+  };
+
+  const playNote = async (note: string) => {
+    await Tone.start();
+    synth.current?.triggerAttackRelease(note, "8n");
+    setActiveNotes(new Set([note]));
+    setTimeout(() => setActiveNotes(new Set()), 200);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <header style={{ padding: '2rem', textAlign: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+        <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
           <Music color="#3b82f6" size={32} />
           <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 800, background: 'linear-gradient(to right, #3b82f6, #10b981)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             Piano Vision Hub
           </h1>
-        </div>
+        </motion.div>
         <p style={{ color: '#94a3b8', fontSize: '1.1rem' }}>AI-Powered Chord Progression Generator</p>
       </header>
 
@@ -48,11 +123,12 @@ function App() {
             <textarea
               className="input-area custom-scrollbar"
               rows={3}
+              placeholder="e.g., A melancholic jazz progression for a rainy day..."
               value={prompt}
-              readOnly
+              onChange={(e) => setPrompt(e.target.value)}
             />
-            <button className="btn-primary" style={{ alignSelf: 'flex-start' }}>
-              <Sparkles size={20} />
+            <button className="btn-primary" onClick={handleGenerate} disabled={isLoading || !prompt.trim()} style={{ alignSelf: 'flex-start' }}>
+              {isLoading ? <div className="loading-indicator"/> : <Sparkles size={20} />}
               Generate Chords
             </button>
           </div>
@@ -62,14 +138,14 @@ function App() {
           <div className="glass-panel" style={{ width: '100%', maxWidth: '800px', padding: '2rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <h2 style={{ margin: 0, fontSize: '1.5rem', color: '#e2e8f0' }}>Generated Progression</h2>
-              <button className="btn-primary">
+              <button className="btn-primary" onClick={playProgression} disabled={isPlaying}>
                 <Play size={20} /> Play
               </button>
             </div>
             
             <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '1rem' }}>
               {chords.map((chord, i) => (
-                <div key={i} style={{ background: i === 0 ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)', border: i === 0 ? '1px solid #3b82f6' : '1px solid transparent', padding: '1rem', borderRadius: '0.5rem', minWidth: '120px', textAlign: 'center' }}>
+                <div key={i} style={{ background: 'rgba(255,255,255,0.05)', padding: '1rem', borderRadius: '0.5rem', minWidth: '120px', textAlign: 'center' }}>
                   <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#3b82f6' }}>{chord.chord}</div>
                   <div style={{ color: '#94a3b8', fontSize: '0.875rem', marginTop: '0.5rem' }}>{chord.notes.join(', ')}</div>
                 </div>
@@ -81,6 +157,7 @@ function App() {
                 <div
                   key={key.note}
                   className={`key-${key.type} ${activeNotes.has(key.note) ? 'active' : ''}`}
+                  onClick={() => playNote(key.note)}
                 />
               ))}
             </div>
