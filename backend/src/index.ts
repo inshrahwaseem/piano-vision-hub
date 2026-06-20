@@ -59,3 +59,5 @@ app.get('/api/health', (req, res) => {
 app.listen(port, () => {
   console.log(`Piano Vision Hub server running on port ${port}`);
 });
+
+export default app;
