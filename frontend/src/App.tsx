@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Music, Play, Sparkles, Wand2 } from 'lucide-react';
 import * as Tone from 'tone';
@@ -153,7 +153,7 @@ function App() {
             </div>
 
             <div className="piano-container">
-              {PIANO_KEYS.map((key, i) => (
+              {PIANO_KEYS.map((key) => (
                 <div
                   key={key.note}
                   className={`key-${key.type} ${activeNotes.has(key.note) ? 'active' : ''}`}
